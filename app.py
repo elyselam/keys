@@ -31,21 +31,21 @@ def init_db():
         conn.commit()
         conn.close()
 
-@app.route('/')
+@app.route('/promoter')
 def index():
     conn = get_db()
     events = conn.execute('SELECT * FROM event ORDER BY date, time').fetchall()
     conn.close()
     return render_template('index.html', events=events)
 
-@app.route('/add', methods=['POST'])
+@app.route('/promoter/add', methods=['POST'])
 def add():
     title = request.form['title']
     description = request.form['description']
     date = request.form['date']
     time = request.form['time']
     day_night = request.form['day_night']
-    fee = request.form['fee']
+    fee = request.form['fee'].replace(',', '') if request.form['fee'] else None
     
     conn = get_db()
     conn.execute('''
@@ -56,10 +56,38 @@ def add():
     conn.close()
     return redirect(url_for('index'))
 
-@app.route('/delete/<int:event_id>', methods=['POST'])
+@app.route('/promoter/delete/<int:event_id>', methods=['POST'])
 def delete(event_id):
     conn = get_db()
     conn.execute('DELETE FROM event WHERE id = ?', (event_id,))
+    conn.commit()
+    conn.close()
+    return redirect(url_for('index'))
+
+@app.route('/promoter/edit/<int:event_id>', methods=['GET'])
+def edit(event_id):
+    conn = get_db()
+    event = conn.execute('SELECT * FROM event WHERE id = ?', (event_id,)).fetchone()
+    conn.close()
+    if event is None:
+        return redirect(url_for('index'))
+    return render_template('edit.html', event=event)
+
+@app.route('/promoter/update/<int:event_id>', methods=['POST'])
+def update(event_id):
+    title = request.form['title']
+    description = request.form['description']
+    date = request.form['date']
+    time = request.form['time']
+    day_night = request.form['day_night']
+    fee = request.form['fee'].replace(',', '') if request.form['fee'] else None
+    
+    conn = get_db()
+    conn.execute('''
+        UPDATE event 
+        SET title = ?, description = ?, date = ?, time = ?, day_night = ?, fee = ?
+        WHERE id = ?
+    ''', (title, description, date, time, day_night, fee, event_id))
     conn.commit()
     conn.close()
     return redirect(url_for('index'))
