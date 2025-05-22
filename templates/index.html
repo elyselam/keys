@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css">
+    <style>
+        form label {
+            text-align: left;
+            display: block;
+        }
+    </style>
+    <script>
+        function formatCurrency(input) {
+            // Remove all non-digit characters except decimal point
+            let value = input.value.replace(/[^\d.]/g, '');
+            
+            // Ensure only one decimal point
+            const parts = value.split('.');
+            if (parts.length > 2) {
+                value = parts[0] + '.' + parts.slice(1).join('');
+            }
+            
+            // Format the whole number part with commas
+            if (parts[0]) {
+                parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            }
+            
+            // Limit to 2 decimal places
+            if (parts[1]) {
+                parts[1] = parts[1].slice(0, 2);
+            }
+            
+            // Update the input value
+            input.value = parts.join('.');
+        }
+
+        function prepareForSubmit(input) {
+            // Remove commas before submitting
+            input.value = input.value.replace(/,/g, '');
+        }
+    </script>
+    <title>Event Management</title>
+</head>
+<body>
+    <h1>Event Management</h1>
+    
+    <form action="/add" method="POST">
+        <div>
+            <label for="title">Title</label>
+            <input type="text" name="title" id="title" required>
+        </div>
+        <div>
+            <label for="description">Description</label>
+            <textarea name="description" id="description" rows="3"></textarea>
+        </div>
+        <div>
+            <label for="date">Date</label>
+            <input type="date" name="date" id="date" required>
+        </div>
+        <div>
+            <label for="time">Time</label>
+            <input type="time" name="time" id="time" required>
+        </div>
+        <div>
+            <label for="day_night">Day/Night</label>
+            <select name="day_night" id="day_night" required>
+                <option value="day">Day</option>
+                <option value="night">Night</option>
+            </select>
+        </div>
+        <div>
+            <label for="fee">Fee</label>
+            <div style="position: relative;">
+                <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%);">$</span>
+                <input type="text" name="fee" id="fee" 
+                       oninput="formatCurrency(this)" 
+                       onblur="formatCurrency(this)"
+                       onsubmit="prepareForSubmit(this)"
+                       pattern="^\$?\d{1,3}(,\d{3})*(\.\d{0,2})?$"
+                       title="Please enter a valid amount (e.g., 1,234.56)"
+                       style="padding-left: 20px;">
+            </div>
+        </div>
+        <button type="submit">Add Event</button>
+    </form>
+
+    <h2>Events</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Description</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Day/Night</th>
+                <th>Fee</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr>
+                <td>{{ event.title }}</td>
+                <td>{{ event.description }}</td>
+                <td>{{ event.date }}</td>
+                <td>{{ event.time }}</td>
+                <td>{{ event.day_night|title }}</td>
+                <td>{{ "${:,.2f}".format(event.fee) if event.fee else "Free" }}</td>
+                <td>
+                    <form action="/edit/{{ event.id }}" method="GET" style="display: inline;">
+                        <button type="submit">Edit</button>
+                    </form>
+                    <form action="/delete/{{ event.id }}" method="POST" style="display: inline;">
+                        <button type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
