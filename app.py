@@ -3,6 +3,9 @@ import sqlite3
 from pathlib import Path
 from functools import wraps
 import logging
+import os
+import time as time_module
+from werkzeug.utils import secure_filename
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -10,6 +13,17 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # Change this to a secure secret key
+
+# File upload configuration
+UPLOAD_FOLDER = 'static/uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'heic'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Create uploads directory if it doesn't exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # Database configuration
 DATABASE = 'sqlite3_db.db'
@@ -39,16 +53,25 @@ def init_db():
             CREATE TABLE IF NOT EXISTS event (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
+                location TEXT NOT NULL,
                 description TEXT,
                 date TEXT NOT NULL,
                 time TEXT NOT NULL,
                 day_night TEXT NOT NULL,
-                fee REAL
+                fee REAL,
+                image_path TEXT
             )
         ''')
         conn.commit()
         conn.close()
         logger.info("Database created successfully")
+
+# Initialize database before each request if it doesn't exist
+@app.before_request
+def before_request():
+    if not Path(DATABASE).exists():
+        init_db()
+        logger.info("Database initialized on first request")
 
 # Login required decorator
 def login_required(f):
@@ -76,10 +99,16 @@ def promoter_required(f):
 
 @app.route('/')
 def index():
-    return render_template('register.html')
+    conn = get_db()
+    events = conn.execute('SELECT * FROM event ORDER BY date, time').fetchall()
+    conn.close()
+    return render_template('index.html', events=events)
 
-@app.route('/register', methods=['POST'])
+@app.route('/register', methods=['GET', 'POST'])
 def register():
+    if request.method == 'GET':
+        return render_template('register.html')
+        
     email = request.form['email']
     password = request.form['password']
     
@@ -120,6 +149,7 @@ def login_post():
     
     if user:
         session['user_id'] = user['id']
+        session['is_promoter'] = user['is_promoter']
         logger.info(f"User {email} logged in successfully, is_promoter: {user['is_promoter']}")
         if user['is_promoter']:
             return redirect(url_for('promoter'))
@@ -141,27 +171,41 @@ def promoter():
     conn = get_db()
     events = conn.execute('SELECT * FROM event ORDER BY date, time').fetchall()
     conn.close()
-    return render_template('index.html', events=events)
+    return render_template('promoter.html', events=events)
 
 @app.route('/promoter/add', methods=['POST'])
 @promoter_required
 def add():
     logger.info(f"Adding new event, user_id: {session.get('user_id')}")
     title = request.form['title']
+    location = request.form['location']
     description = request.form['description']
     date = request.form['date']
     time = request.form['time']
     day_night = request.form['day_night']
     fee = request.form['fee'].replace(',', '') if request.form['fee'] else None
     
-    logger.info(f"Event details - Title: {title}, Date: {date}, Time: {time}, Fee: {fee}")
+    # Handle image upload
+    image_path = None
+    if 'image' in request.files:
+        file = request.files['image']
+        if file and file.filename and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            # Add timestamp to filename to make it unique
+            filename = f"{int(time_module.time())}_{filename}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            image_path = os.path.join('uploads', filename)
+            logger.info(f"Image saved: {image_path}")
+    
+    logger.info(f"Event details - Title: {title}, Location: {location}, Date: {date}, Time: {time}, Fee: {fee}")
     
     conn = get_db()
     try:
         conn.execute('''
-            INSERT INTO event (title, description, date, time, day_night, fee) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (title, description, date, time, day_night, fee))
+            INSERT INTO event (title, location, description, date, time, day_night, fee, image_path) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (title, location, description, date, time, day_night, fee, image_path))
         conn.commit()
         logger.info("Event added successfully")
     except Exception as e:
@@ -174,6 +218,11 @@ def add():
 @app.route('/promoter/delete/<int:event_id>', methods=['POST'])
 def delete(event_id):
     conn = get_db()
+    # Get the event's image path before deleting
+    event = conn.execute('SELECT image_path FROM event WHERE id = ?', (event_id,)).fetchone()
+    if event and event['image_path']:
+        delete_image_file(event['image_path'])
+    
     conn.execute('DELETE FROM event WHERE id = ?', (event_id,))
     conn.commit()
     conn.close()
@@ -188,21 +237,57 @@ def edit(event_id):
         return redirect(url_for('promoter'))
     return render_template('edit.html', event=event)
 
+def delete_image_file(image_path):
+    if image_path:
+        try:
+            full_path = os.path.join(app.static_folder, image_path)
+            if os.path.exists(full_path):
+                os.remove(full_path)
+                logger.info(f"Deleted image file: {full_path}")
+        except Exception as e:
+            logger.error(f"Error deleting image file: {str(e)}")
+
 @app.route('/promoter/update/<int:event_id>', methods=['POST'])
 def update(event_id):
     title = request.form['title']
+    location = request.form['location']
     description = request.form['description']
     date = request.form['date']
     time = request.form['time']
     day_night = request.form['day_night']
     fee = request.form['fee'].replace(',', '') if request.form['fee'] else None
     
+    # Get current event data
     conn = get_db()
+    current_event = conn.execute('SELECT image_path FROM event WHERE id = ?', (event_id,)).fetchone()
+    current_image_path = current_event['image_path'] if current_event else None
+    
+    # Handle image upload or removal
+    image_path = current_image_path
+    if 'remove_image' in request.form:
+        # Delete the current image file
+        delete_image_file(current_image_path)
+        image_path = None
+    elif 'image' in request.files:
+        file = request.files['image']
+        if file and file.filename and allowed_file(file.filename):
+            # Delete the current image file if it exists
+            delete_image_file(current_image_path)
+            
+            # Save the new image
+            filename = secure_filename(file.filename)
+            filename = f"{int(time_module.time())}_{filename}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            image_path = os.path.join('uploads', filename)
+            logger.info(f"New image saved: {image_path}")
+    
+    # Update the event
     conn.execute('''
         UPDATE event 
-        SET title = ?, description = ?, date = ?, time = ?, day_night = ?, fee = ?
+        SET title = ?, location = ?, description = ?, date = ?, time = ?, day_night = ?, fee = ?, image_path = ?
         WHERE id = ?
-    ''', (title, description, date, time, day_night, fee, event_id))
+    ''', (title, location, description, date, time, day_night, fee, image_path, event_id))
     conn.commit()
     conn.close()
     return redirect(url_for('promoter'))
@@ -212,5 +297,4 @@ def update(event_id):
 #     return 'About Page'
 
 if __name__ == '__main__':
-    init_db()
     app.run(debug=True, port=5001)

@@ -9,6 +9,10 @@
             text-align: left;
             display: block;
         }
+        .current-image {
+            max-width: 200px;
+            margin: 10px 0;
+        }
     </style>
     <script>
         function formatCurrency(input) {
@@ -45,10 +49,22 @@
 <body>
     <h1>Edit Event</h1>
     
-    <form action="/promoter/update/{{ event.id }}" method="POST">
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <form action="/promoter/update/{{ event.id }}" method="POST" enctype="multipart/form-data">
         <div>
             <label for="title">Title</label>
             <input type="text" name="title" id="title" value="{{ event.title }}" required>
+        </div>
+        <div>
+            <label for="location">Location</label>
+            <input type="text" name="location" id="location" value="{{ event.location }}" required>
         </div>
         <div>
             <label for="description">Description</label>
@@ -82,6 +98,21 @@
                        title="Please enter a valid amount (e.g., 1,234.56)"
                        style="padding-left: 20px;">
             </div>
+        </div>
+        <div>
+            <label for="image">Event Image</label>
+            {% if event.image_path %}
+                <div>
+                    <p>Current image:</p>
+                    <img src="{{ url_for('static', filename=event.image_path) }}" alt="{{ event.title }}" class="current-image">
+                    <div>
+                        <input type="checkbox" name="remove_image" id="remove_image">
+                        <label for="remove_image">Remove current image</label>
+                    </div>
+                </div>
+            {% endif %}
+            <input type="file" name="image" id="image" accept="image/*">
+            <small>Allowed formats: PNG, JPG, JPEG, GIF, HEIC</small>
         </div>
         <button type="submit">Update Event</button>
         <a href="/promoter" style="margin-left: 10px;">Cancel</a>
